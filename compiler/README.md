@@ -42,6 +42,28 @@ Components use common headers. Allocator unit tests use explicit analysis
 fixtures instead of the production analysis library. Phi and lowering tests
 construct IR directly, without requiring a parser or backend.
 
+## Task Group 2 — Classical Register Allocation
+
+Task Group 2 implements strategies for assigning values to registers and selecting
+values to spill to memory, evaluating their behaviour under register pressure across
+allocatable register budgets $k \in [1, 25]$:
+
+- `spillCosts`: Computes static loop-weighted spill costs based on $10^{\text{loopDepth}}$
+  scaling for definitions and operand reads, with $1.0$ for parameter entry definitions.
+- `allocNaive`: Worst-case baseline allocator that spills every node in the interference graph.
+- `allocLinearScan`: Whole-interval linear-scan allocator sweeping sorted RPO live intervals
+  and evicting the furthest-ending interval on register pressure overflow.
+- `allocChaitinBriggs`: Optimistic graph-colouring allocator with Briggs' simplification stack
+  and cost/degree spill candidate selection.
+
+Run its isolated acceptance tests with:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DSSARV_TEST_ALLOCATORS=ON
+cmake --build build --target allocators-tests -j 4
+ctest --test-dir build -L group2 --output-on-failure
+```
+
 ## Task Group 3 — Phi Elimination and Basic RISC-V Lowering
 
 Task Group 3 turns executable SSA edges into ordinary copies and lowers the
