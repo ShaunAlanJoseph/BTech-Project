@@ -1,8 +1,8 @@
-# Task Group 3 — Phi Elimination and Basic RISC-V Lowering
+# Task 3 — Phi Elimination and Basic RISC-V Lowering
 
 ## Role in the pipeline
 
-Group 3 owns `src/phielim.cpp` and `src/lowering.cpp`. It receives the shared
+Task3 contributes `src/phielim.cpp` and `src/lowering.cpp`. It receives the shared
 SSA `Function` representation (`ir.hpp`), its resolved CFG, and—at assembly
 time—the allocation/spill services exposed by `LoweringContext`. It produces a
 phi-free executable CFG and RISC-V instruction sequences through that context.

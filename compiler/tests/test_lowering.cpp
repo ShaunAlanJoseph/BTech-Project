@@ -71,6 +71,36 @@ TEST(Lowering, AllIntegerComparisonPredicatesYieldCommittedI1) {
         EXPECT_NE(ctx.text().find("andi a1, a1, 1"), std::string::npos);
     }
 }
+TEST(Lowering, EmitsNewlineTerminatedTextSupportsPointersAndNormalisesNarrowEquality) {
+    fixtures::RecordingContext narrowContext;
+    narrowContext.registers = {{0, "a0"}, {1, "a1"}, {2, "a0"}};
+    Instr narrow; narrow.opcode = "icmp"; narrow.subop = "eq";
+    narrow.type = "i7"; narrow.dst = 2;
+    narrow.operands = {{0, "%x"}, {1, "%y"}};
+    lowerCompare(narrow, narrowContext);
+
+    const std::string narrowAssembly = narrowContext.text();
+    EXPECT_NE(narrowAssembly.find("slli t5, a0, 57\nsrai t5, t5, 57\n"),
+              std::string::npos);
+    EXPECT_NE(narrowAssembly.find("slli t6, a1, 57\nsrai t6, t6, 57\n"),
+              std::string::npos);
+    for (const auto& fragment : narrowContext.lines) {
+        ASSERT_FALSE(fragment.empty());
+        EXPECT_EQ(fragment.back(), '\n');
+    }
+
+    fixtures::RecordingContext pointerContext;
+    pointerContext.registers = {{0, "a0"}, {1, "a1"}, {2, "a2"}};
+    Instr pointer; pointer.opcode = "icmp"; pointer.subop = "eq";
+    pointer.type = "ptr"; pointer.dst = 2;
+    pointer.operands = {{0, "%left"}, {1, "%right"}};
+    EXPECT_NO_THROW(lowerCompare(pointer, pointerContext));
+
+    Instr move; move.opcode = "mov"; move.type = "ptr"; move.dst = 3;
+    move.operands = {{0, "%pointer"}};
+    EXPECT_NO_THROW(lowerMove(move, pointerContext));
+    EXPECT_EQ(pointerContext.commits.size(), 2u);
+}
 TEST(Lowering, CastsHandleSignZeroTruncationAndNoopBitcast) {
     for (const auto& [opcode, source, target] :
          std::initializer_list<std::tuple<const char*, const char*, const char*>>{

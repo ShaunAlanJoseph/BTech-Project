@@ -30,7 +30,7 @@ public:
     }
     void emit(std::string_view assembly) override { lines.emplace_back(assembly); }
     std::string text() const {
-        std::string s; for (const auto& line : lines) s += line + '\n'; return s;
+        std::string s; for (const auto& line : lines) s += line; return s;
     }
 };
 }

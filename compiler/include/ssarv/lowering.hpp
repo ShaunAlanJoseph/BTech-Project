@@ -21,7 +21,7 @@ public:
     virtual void emit(std::string_view assembly) = 0;
 };
 
-// Preconditions: supported, structurally valid integer IR; phi-free;
+// Preconditions: supported, structurally valid scalar integer/pointer IR; phi-free;
 // valid allocation; distinct scratch registers t5/t6 reserved by backend.
 // No function below changes IR/allocation, creates spill slots directly,
 // or changes sp. Results are committed through storeResult().

@@ -19,6 +19,10 @@ constexpr const char* kScratch1 = "t6";
 }
 
 unsigned integerWidth(std::string_view type) {
+    // The compiler targets RV64, so pointers use the same physical width as
+    // i64 values. Keep accepting `ptr` anywhere a value's storage width is
+    // needed (comparisons, moves, selects, casts, and arithmetic lowering).
+    if (type == "ptr") return 64;
     if (type.size() < 2 || type.front() != 'i') {
         throw std::invalid_argument("expected integer type, got '" + std::string(type) + "'");
     }
@@ -64,9 +68,18 @@ void requireDestination(const Instr& in) {
     }
 }
 
+void emitLine(LoweringContext& ctx, std::string assembly);
+
 void emitMove(LoweringContext& ctx, const std::string& destination,
               const std::string& source) {
-    if (destination != source) ctx.emit("mv " + destination + ", " + source);
+    if (destination != source) emitLine(ctx, "mv " + destination + ", " + source);
+}
+
+// LoweringContext::emit appends bytes to the final assembly stream. Include
+// the line ending here so adjacent emitted instructions remain separate.
+void emitLine(LoweringContext& ctx, std::string assembly) {
+    assembly.push_back('\n');
+    ctx.emit(assembly);
 }
 
 // Values narrower than XLEN live as sign-extended integers, except i1 values,
@@ -77,11 +90,11 @@ void normalise(LoweringContext& ctx, const std::string& destination,
     if (width == 64) {
         emitMove(ctx, destination, source);
     } else if (width == 1) {
-        ctx.emit("andi " + destination + ", " + source + ", 1");
+        emitLine(ctx, "andi " + destination + ", " + source + ", 1");
     } else {
         const auto shift = std::to_string(64U - width);
-        ctx.emit("slli " + destination + ", " + source + ", " + shift);
-        ctx.emit("srai " + destination + ", " + destination + ", " + shift);
+        emitLine(ctx, "slli " + destination + ", " + source + ", " + shift);
+        emitLine(ctx, "srai " + destination + ", " + destination + ", " + shift);
     }
 }
 
@@ -91,11 +104,11 @@ void zeroExtend(LoweringContext& ctx, const std::string& destination,
     if (width == 64) {
         emitMove(ctx, destination, source);
     } else if (width == 1) {
-        ctx.emit("andi " + destination + ", " + source + ", 1");
+        emitLine(ctx, "andi " + destination + ", " + source + ", 1");
     } else {
         const auto shift = std::to_string(64U - width);
-        ctx.emit("slli " + destination + ", " + source + ", " + shift);
-        ctx.emit("srli " + destination + ", " + destination + ", " + shift);
+        emitLine(ctx, "slli " + destination + ", " + source + ", " + shift);
+        emitLine(ctx, "srli " + destination + ", " + destination + ", " + shift);
     }
 }
 
@@ -104,8 +117,8 @@ void zeroExtend(LoweringContext& ctx, const std::string& destination,
 void signedBits(LoweringContext& ctx, const std::string& destination,
                 const std::string& source, unsigned width) {
     if (width == 1) {
-        ctx.emit("andi " + destination + ", " + source + ", 1");
-        ctx.emit("neg " + destination + ", " + destination);
+        emitLine(ctx, "andi " + destination + ", " + source + ", 1");
+        emitLine(ctx, "neg " + destination + ", " + destination);
         return;
     }
     normalise(ctx, destination, source, width);
@@ -143,38 +156,38 @@ void lowerBinary(const Instr& in, LoweringContext& ctx) {
     const std::string destination = ctx.destination(in.dst, kScratch0);
 
     if (in.opcode == "add") {
-        ctx.emit("add " + destination + ", " + left + ", " + right);
+        emitLine(ctx, "add " + destination + ", " + left + ", " + right);
     } else if (in.opcode == "sub") {
-        ctx.emit("sub " + destination + ", " + left + ", " + right);
+        emitLine(ctx, "sub " + destination + ", " + left + ", " + right);
     } else if (in.opcode == "mul") {
-        ctx.emit("mul " + destination + ", " + left + ", " + right);
+        emitLine(ctx, "mul " + destination + ", " + left + ", " + right);
     } else if (in.opcode == "and") {
-        ctx.emit("and " + destination + ", " + left + ", " + right);
+        emitLine(ctx, "and " + destination + ", " + left + ", " + right);
     } else if (in.opcode == "or") {
-        ctx.emit("or " + destination + ", " + left + ", " + right);
+        emitLine(ctx, "or " + destination + ", " + left + ", " + right);
     } else if (in.opcode == "xor") {
-        ctx.emit("xor " + destination + ", " + left + ", " + right);
+        emitLine(ctx, "xor " + destination + ", " + left + ", " + right);
     } else if (in.opcode == "shl") {
-        ctx.emit("sll " + destination + ", " + left + ", " + right);
+        emitLine(ctx, "sll " + destination + ", " + left + ", " + right);
     } else if (in.opcode == "lshr") {
         emitMove(ctx, kScratch1, right);
         zeroExtend(ctx, destination, left, width);
-        ctx.emit("srl " + destination + ", " + destination + ", " + kScratch1);
+        emitLine(ctx, "srl " + destination + ", " + destination + ", " + kScratch1);
     } else if (in.opcode == "ashr") {
         emitMove(ctx, kScratch1, right);
         signedBits(ctx, destination, left, width);
-        ctx.emit("sra " + destination + ", " + destination + ", " + kScratch1);
+        emitLine(ctx, "sra " + destination + ", " + destination + ", " + kScratch1);
     } else if (in.opcode == "udiv" || in.opcode == "urem") {
         emitMove(ctx, kScratch1, right);
         zeroExtend(ctx, destination, left, width);
         zeroExtend(ctx, kScratch1, kScratch1, width);
-        ctx.emit(std::string(in.opcode == "udiv" ? "divu " : "remu ") +
+        emitLine(ctx, std::string(in.opcode == "udiv" ? "divu " : "remu ") +
                  destination + ", " + destination + ", " + kScratch1);
     } else if (in.opcode == "sdiv" || in.opcode == "srem") {
         emitMove(ctx, kScratch1, right);
         signedBits(ctx, destination, left, width);
         signedBits(ctx, kScratch1, kScratch1, width);
-        ctx.emit(std::string(in.opcode == "sdiv" ? "div " : "rem ") +
+        emitLine(ctx, std::string(in.opcode == "sdiv" ? "div " : "rem ") +
                  destination + ", " + destination + ", " + kScratch1);
     }
 
@@ -201,8 +214,13 @@ void lowerCompare(const Instr& in, LoweringContext& ctx) {
     const std::string destination = ctx.destination(in.dst, kScratch0);
 
     if (in.subop == "eq" || in.subop == "ne") {
-        ctx.emit("xor " + destination + ", " + left + ", " + right);
-        ctx.emit(std::string(in.subop == "eq" ? "seqz " : "snez ") +
+        // The physical register representation may contain sign-extension
+        // bits above the LLVM value width. Mask/canonicalise both operands
+        // before equality, including register operands (not just literals).
+        normalise(ctx, kScratch0, left, width);
+        normalise(ctx, kScratch1, right, width);
+        emitLine(ctx, "xor " + destination + ", " + kScratch0 + ", " + kScratch1);
+        emitLine(ctx, std::string(in.subop == "eq" ? "seqz " : "snez ") +
                  destination + ", " + destination);
     } else if (in.subop == "ult" || in.subop == "ugt" ||
                in.subop == "ule" || in.subop == "uge") {
@@ -210,15 +228,15 @@ void lowerCompare(const Instr& in, LoweringContext& ctx) {
         zeroExtend(ctx, destination, left, width);
         zeroExtend(ctx, kScratch1, kScratch1, width);
         if (in.subop == "ult") {
-            ctx.emit("sltu " + destination + ", " + destination + ", " + kScratch1);
+            emitLine(ctx, "sltu " + destination + ", " + destination + ", " + kScratch1);
         } else if (in.subop == "ugt") {
-            ctx.emit("sltu " + destination + ", " + kScratch1 + ", " + destination);
+            emitLine(ctx, "sltu " + destination + ", " + kScratch1 + ", " + destination);
         } else if (in.subop == "ule") {
-            ctx.emit("sltu " + destination + ", " + kScratch1 + ", " + destination);
-            ctx.emit("xori " + destination + ", " + destination + ", 1");
+            emitLine(ctx, "sltu " + destination + ", " + kScratch1 + ", " + destination);
+            emitLine(ctx, "xori " + destination + ", " + destination + ", 1");
         } else {
-            ctx.emit("sltu " + destination + ", " + destination + ", " + kScratch1);
-            ctx.emit("xori " + destination + ", " + destination + ", 1");
+            emitLine(ctx, "sltu " + destination + ", " + destination + ", " + kScratch1);
+            emitLine(ctx, "xori " + destination + ", " + destination + ", 1");
         }
     } else if (in.subop == "slt" || in.subop == "sgt" ||
                in.subop == "sle" || in.subop == "sge") {
@@ -226,15 +244,15 @@ void lowerCompare(const Instr& in, LoweringContext& ctx) {
         signedBits(ctx, destination, left, width);
         signedBits(ctx, kScratch1, kScratch1, width);
         if (in.subop == "slt") {
-            ctx.emit("slt " + destination + ", " + destination + ", " + kScratch1);
+            emitLine(ctx, "slt " + destination + ", " + destination + ", " + kScratch1);
         } else if (in.subop == "sgt") {
-            ctx.emit("slt " + destination + ", " + kScratch1 + ", " + destination);
+            emitLine(ctx, "slt " + destination + ", " + kScratch1 + ", " + destination);
         } else if (in.subop == "sle") {
-            ctx.emit("slt " + destination + ", " + kScratch1 + ", " + destination);
-            ctx.emit("xori " + destination + ", " + destination + ", 1");
+            emitLine(ctx, "slt " + destination + ", " + kScratch1 + ", " + destination);
+            emitLine(ctx, "xori " + destination + ", " + destination + ", 1");
         } else {
-            ctx.emit("slt " + destination + ", " + destination + ", " + kScratch1);
-            ctx.emit("xori " + destination + ", " + destination + ", 1");
+            emitLine(ctx, "slt " + destination + ", " + destination + ", " + kScratch1);
+            emitLine(ctx, "xori " + destination + ", " + destination + ", 1");
         }
     }
 
@@ -290,18 +308,18 @@ void lowerSelect(const Instr& in, LoweringContext& ctx) {
     normaliseLiteralScratch(ctx, condition, conditionReg, kScratch0, 1);
     const std::string falseLabel = ctx.freshLabel("select.false");
     const std::string endLabel = ctx.freshLabel("select.end");
-    ctx.emit("beqz " + conditionReg + ", " + falseLabel);
+    emitLine(ctx, "beqz " + conditionReg + ", " + falseLabel);
 
     const std::string selectedTrue = ctx.operand(trueValue, kScratch0);
     emitMove(ctx, destination, selectedTrue);
     normalise(ctx, destination, destination, width);
-    ctx.emit("j " + endLabel);
+    emitLine(ctx, "j " + endLabel);
 
-    ctx.emit(falseLabel + ":");
+    emitLine(ctx, falseLabel + ":");
     const std::string selectedFalse = ctx.operand(falseValue, kScratch0);
     emitMove(ctx, destination, selectedFalse);
     normalise(ctx, destination, destination, width);
-    ctx.emit(endLabel + ":");
+    emitLine(ctx, endLabel + ":");
     commit(ctx, in, destination);
 }
 
@@ -320,15 +338,15 @@ void lowerMove(const Instr& in, LoweringContext& ctx) {
 void lowerTerminator(const Instr& in, LoweringContext& ctx) {
     if (in.opcode == "br") {
         if (in.succs.size() == 1) {
-            ctx.emit("j " + ctx.blockLabel(in.succs[0]));
+            emitLine(ctx, "j " + ctx.blockLabel(in.succs[0]));
             return;
         }
         if (in.succs.size() == 2) {
             const Operand condition = operandAt(in, 0, "conditional branch");
             const std::string conditionReg = ctx.operand(condition, kScratch0);
             normaliseLiteralScratch(ctx, condition, conditionReg, kScratch0, 1);
-            ctx.emit("bnez " + conditionReg + ", " + ctx.blockLabel(in.succs[0]));
-            ctx.emit("j " + ctx.blockLabel(in.succs[1]));
+            emitLine(ctx, "bnez " + conditionReg + ", " + ctx.blockLabel(in.succs[0]));
+            emitLine(ctx, "j " + ctx.blockLabel(in.succs[1]));
             return;
         }
         throw std::invalid_argument("branch must have one or two successors");
@@ -347,10 +365,10 @@ void lowerTerminator(const Instr& in, LoweringContext& ctx) {
             Operand caseValue{kNoValue, arm.value};
             const std::string caseReg = ctx.operand(caseValue, kScratch1);
             normalise(ctx, caseReg, caseReg, width);
-            ctx.emit("beq " + valueReg + ", " + caseReg + ", " +
+            emitLine(ctx, "beq " + valueReg + ", " + caseReg + ", " +
                      ctx.blockLabel(arm.target));
         }
-        ctx.emit("j " + ctx.blockLabel(in.succs[0]));
+        emitLine(ctx, "j " + ctx.blockLabel(in.succs[0]));
         return;
     }
 
@@ -363,12 +381,12 @@ void lowerTerminator(const Instr& in, LoweringContext& ctx) {
                 normalise(ctx, "a0", "a0", integerWidth(in.type));
             }
         }
-        ctx.emit("j " + ctx.epilogueLabel());
+        emitLine(ctx, "j " + ctx.epilogueLabel());
         return;
     }
 
     if (in.opcode == "unreachable") {
-        ctx.emit("ebreak");
+        emitLine(ctx, "ebreak");
         return;
     }
     unsupported("terminator opcode", in.opcode);
